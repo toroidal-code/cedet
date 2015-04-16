@@ -144,10 +144,12 @@ parents running forward, such as namespace/namespace/class"
          (class-sym (cond
                      ((member class '(function variable label program value))
                       class)
+                     ((eq class 'value) 'value)
                      ((eq class 'prototype)
                       (setq prototype t)
                       'function)
-                     ((member class '(namespace class trait struct union enum typedef))
+                     ((member class '(namespace class trait struct union
+                                      enum typedef type module))
                       (setq type (symbol-name class))
                       'type)
                      ((eq class 'member)
@@ -187,7 +189,7 @@ parents running forward, such as namespace/namespace/class"
                             class-sym
                             ;; Leave filename for some other time
                             ;; :filename (nth 1 elements)
-                            :line line
+                            :line (if (= line 0) 1 line)
                             :prototype-flag prototype
                             :constant-flag const
                             :type (if (eq class-sym 'type) type nil) ;; Nil alows override later
@@ -348,7 +350,8 @@ parents running forward, such as namespace/namespace/class"
               ;; There is something extra here though..  It should
               ;; be possible to use this info to do a reparenting operation.
               ((or (string= field "class")
-                   (string= field "struct"))
+                   (string= field "struct")
+                   (string= field "module"))
                (push str attr)
                (push :parent attr))
               ((string= field "namespace")
@@ -391,17 +394,22 @@ parser is also using CTags to dynamically parse the buffer."
         )
   )
 
-(defun semantic-ectags-parse-region (&rest ignore)
-  "Parse the current shell script buffer for semantic tags.
-IGNORE any arguments, always parse the whole buffer."
-  (let ((tags (semantic-ectags-parse-buffer))
-        (newtags nil))
+(defun semantic-ectags-expand-tags (tags &optional end)
+  "A helper function to expand multiple TAGS."
+  (let ((newtags nil))
     (while tags
       (push (semantic-ectags-expand-tag (car tags)
-                                       (car (cdr tags)))
+                                        (or (car (cdr tags))
+                                            end))
             newtags)
       (setq tags (cdr tags)))
     (nreverse newtags)))
+
+(defun semantic-ectags-parse-region (&rest ignore)
+  "Parse the current shell script buffer for semantic tags.
+IGNORE any arguments, always parse the whole buffer."
+  (let ((tags (semantic-ectags-parse-buffer)))
+    (semantic-ectags-expand-tags tags)))
 
 (defun semantic-ectags-parse-changes ()
   "Parse changes in the current shell script buffer."
@@ -416,8 +424,7 @@ IGNORE any arguments, always parse the whole buffer."
   "Expand the Exuberant CTags TAG into the current buffer.
 NEXTTAG provides a clue to the end of TAG.
 CTags start out with a a line number.
-Cooking a tag needs character positions instead.
-NOTE: Currently this only supports a flat-list style tag."
+Cooking a tag needs character positions instead."
   (let ((name (semantic-tag-name tag))
         (class (semantic-tag-class tag))
         (attr (semantic-tag-attributes tag))
@@ -426,9 +433,13 @@ NOTE: Currently this only supports a flat-list style tag."
         start end)
     (while attr
       (if (eq (car attr) :line)
-          (setq line (car (cdr attr)))
-        (push (car (cdr attr)) newattr)
-        (push (car attr) newattr))
+          (setq line (car (cdr attr))))
+      (push (car (cdr attr)) newattr)
+      (push (car attr) newattr)
+      (when (eq (car attr) :members)
+        (setf (car (cdr newattr))
+              (semantic-ectags-expand-tags (car (cdr attr)) nexttag))
+        (setf nexttag (car (car (cdr attr)))))
       (setq attr (cdr (cdr attr))))
     (save-excursion
       (goto-char (point-min))
@@ -438,8 +449,8 @@ NOTE: Currently this only supports a flat-list style tag."
             (progn
               (if nexttag
                   (progn
-		    (goto-char (point-min))
-		    (forward-line (1- (semantic-tag-get-attribute nexttag :line))))
+                   (goto-char (point-min))
+                   (forward-line (1- (semantic-tag-get-attribute nexttag :line))))
                 (goto-char (point-max))
                 )
               (while (forward-comment -1) nil)
