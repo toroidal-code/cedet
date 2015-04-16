@@ -92,11 +92,9 @@ in a buffer."
       (let* ((context (if (semantic-analyze-context-child-p context)
 			  context
 			(semantic-analyze-current-context context)))
-	     (ans (if (not context)
-		      (error "Nothing to complete")
-		    (:override))))
+	     (ans (when context (:override))))
 	;; If interactive, display them.
-	(when (called-interactively-p 'any)
+	(when (and ans (called-interactively-p 'any))
 	  (with-output-to-temp-buffer "*Possible Completions*"
 	    (semantic-analyze-princ-sequence ans "" (current-buffer)))
 	  (shrink-window-if-larger-than-buffer
